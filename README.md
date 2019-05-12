@@ -1,2 +1,5 @@
 # 411W14
-Python server : comuting distribution
+Python server : 
+- computing distribution
+- client handeling
+- tcp connections
