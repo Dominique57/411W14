@@ -24,19 +24,97 @@ def error(message):
         print(message)
     log(message)
 
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+CLIENT CLASS
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 class ClientServer:
-    def __init__(self, socket, addr):
+    """
+    Constructor
+    """
+    def __init__(self, serv, socket, addr):
+        self.serv = serv
         self.s = socket
         self.addr = addr
         self.avai = True
         self.resp = []
 
+    def closeClient(self, typ="", message=""):
+        if typ != "":
+            self.sendMessage(typ, message)
+        self.s.close()
+
+    """
+    for each client listen if message is sent
+    """
+    def listenMessages(self, serv):
+        message = ""
+        while True:
+            try:
+                data, addr = self.s.recvfrom(serv.buffer)
+                data = data.decode()
+                if data == "":
+                    raise Exception("")
+            except:
+                serv.removeClient(self.addr)
+                log(str(self.addr) + " connection lost")
+                break
+            # read message
+            length = len(data)
+            done = data[length-1] == chr(0)
+            message = message + data
+            if not done:
+                continue 
+            # analyse message
+            typ, length = "", len(message)
+            for i in range(length):
+                if message[i] == "!":
+                    typ = message[:i]
+                    message = message[i+1:length-1]
+                    break
+            self.messageHandler(serv, typ, message)
+            message = ""
+
+    """
+    handle recieved message
+    """
+    def messageHandler(self, serv, typ, message):
+        if typ == Type.Exit.value or typ == Type.Close.value:
+            serv.removeClient(self.addr)
+            error("Client disconned:" + message)
+        elif typ == Type.Status.value:
+            print(self.addr, "replied to status command")
+        elif typ == Type.Message.value:
+            error(str(self.addr) + " sent " + str(len(message)) + " : "+ message)
+        elif typ == Type.Exec.value:
+            self.resp.append(message)
+            self.avai= True
+        else:
+            try:
+                typ = Type(typ)
+            except:
+                error("unknow type")
+                typ = ""
+            error("Client " + str(self.addr) + " sent : " + str(typ) + message)
+
+    def sendMessage(self, Type, Message):
+        Message = Type+"!"+Message+chr(0)
+        length = len(Message)
+        packets = int(math.ceil(length / self.serv.buffer))
+        cur = 0
+        for i in range(packets):
+            self.s.send(Message[cur:cur+self.serv.buffer].encode())
+            cur += self.serv.buffer
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+SERVER CLASS
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 class Server:
     """
     Constructor
     """
     def __init__(self, host = socket.gethostname(), port = 6677):
-        self.buffer = 4096
+        self.buffer = 512
         self.banList = []
         self.s = socket.socket() 
         self.clients = []
@@ -61,74 +139,21 @@ class Server:
         self.closeServer()
 
     """
-    wait for new connection and link listenmessage thread for each new connection
+    wait for new connection and 
+    link listenmessage thread for each new connection
     """
     def listenConnections(self):
         while True:
             c, addr = self.s.accept()
-            client = ClientServer(c, addr)
+            client = ClientServer(self, c, addr)
             if addr[0] in self.banList:
-                self.sendMessage(client, Type.Close.value, "banned")
-                client.s.close()
+                client.closeClient(Type.Close.value, "banned")
                 log("banned " + str(addr) + " blocked")
-                continue
-            self.clients.append(client)
-            log("got connection from " + str(addr))
-            t = threading.Thread(target=self.listenMessages,args=[client])
-            t.start()
-
-    """
-    handle recieved message
-    """
-    def messageHandler(self, client, typ, message):
-        if typ == Type.Exit.value or typ == Type.Close.value:
-            self.removeClient(client.addr)
-            error("Client disconned:" + message)
-        elif typ == Type.Status.value:
-            print(client.addr, "replied to status command")
-        elif typ == Type.Message.value:
-            error(str(client.addr) + " sent : "+ message)
-        elif typ == Type.Exec.value:
-            client.resp.append(message)
-            client.avai= True
-        else:
-            try:
-                typ = Type(typ)
-            except:
-                error("unknow type")
-                typ = ""
-            error("Client " + str(client.addr) + " sent : " + str(typ) + message)
-
-    """
-    for each client listen if message is sent
-    """
-    def listenMessages(self, client):
-        message = ""
-        while True:
-            try:
-                data, addr = client.s.recvfrom(self.buffer)
-                data = data.decode()
-                if data == "":
-                    raise Exception("")
-            except:
-                self.removeClient(client.addr)
-                log(str(client.addr) + " connection lost")
-                break
-            # read message
-            length = len(data)
-            done = data[length-1] == chr(0)
-            message = message + data
-            if not done:
-                continue 
-            # analyse message
-            typ, length = "", len(message)
-            for i in range(length):
-                if message[i] == "!":
-                    typ = message[:i]
-                    message = message[i+1:length-1]
-                    break
-            self.messageHandler(client, typ, message)
-            message = ""
+            else:
+                self.clients.append(client)
+                log("got connection from " + str(addr))
+                t = threading.Thread(target=client.listenMessages,args=[self])
+                t.start()
 
     """
     get client socket by address
@@ -158,22 +183,8 @@ class Server:
     kick client and remove
     """
     def kickClient(self, client, mes = "kicked"):
-        self.sendMessage(client, Type.Close.value, mes)
-        client.s.close()
+        client.sendMessage(Type.Close.value, mes)
         self.removeClient(client.addr)
-
-    def sendMessageByAddr(self, addr, Type, Message):
-        client = self.findClient(addr)
-        self.sendMessage(client, Type, Message)
-
-    def sendMessage(self, client, Type, Message):
-        Message = Type+"!"+Message+chr(0)
-        length = len(Message)
-        packets = int(math.ceil(length / self.buffer))
-        cur = 0
-        for i in range(packets):
-            client.s.send(Message[cur:cur+self.buffer].encode())
-            cur += self.buffer
 
     """
     close server and program
@@ -181,7 +192,7 @@ class Server:
     def closeServer(self):
         log("Closing server")
         for client in self.clients:
-            self.sendMessage(client, Type.Exit.value, "Server closed")
+            client.closeClient("Type.Exit.value", "Server Shutdown")
         self.s.close()
         os._exit(0)
 
@@ -191,16 +202,19 @@ class Server:
     def userInput(self):
         print("press help to see available commands")
         while True:
-            inp = str(input(":"))
-            inp = inp.lower()
+            print("\n$:", end="")
+            try:
+                inp = (str(input(":"))).lower()
+            except:
+                inp = ""
             length = len(self.clients)
             if inp == "help":
-                print("'Quit' to leave\n'Exec' to launch program\n'status' to see clients\n:")
+                print("'Quit' to leave\n'Exec' to launch program\n'status' to see clients\n")
             elif inp == "quit":
                 self.closeServer()
             elif inp==  "status":
-                self.clientActions() if length > 0 else error("No clients")
-            elif inp == "exec" or inp == "Exec":
+                self.clientActions() if length > 0 else print("No clients")
+            elif inp == "exec":
                 self.execMatrix(A, B)
             else:
                 error("No valid actions")
@@ -250,7 +264,7 @@ class Server:
         if action == 1:
             print("enter message:")
             mes = str(input())
-            self.sendMessage(client, Type.Message.value, mes)
+            client.sendMessage(Type.Message.value, mes)
         elif action == 2:
             self.kickClient(client)
         elif action == 3:
@@ -262,7 +276,7 @@ class Server:
             for client in toKick:
                 self.kickClient(client, "banned")
         elif action == 4:
-            self.sendMessage(client, Type.Status.value, "")
+            client.sendMessage(Type.Status.value, "")
 
     def exec_send(self, typ, count = 3, messages = [], sleep = 1/5):
         arr = []
@@ -277,7 +291,7 @@ class Server:
             return -1
         for val in arr:
             client, message = val[0], val[1]
-            self.sendMessage(client, typ, message)
+            client.sendMessage(typ, message)
             client.avai = False
         result = [None] * count
         done = False

@@ -23,7 +23,7 @@ def error(message):
 class Client():
 
     def __init__(self):
-        self.buffer = 4096
+        self.buffer = 512
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         host = socket.gethostname()
         port = 6677
@@ -34,9 +34,9 @@ class Client():
             os._exit(0)
         threading.Thread(target=self.listenMessages).start()
         self.inputUser()
-        self.closeSocket()
 
     def sendMessage(self, Type, Message):
+        print(len(Message))
         Message = Type+"!"+Message+chr(0)
         length = len(Message)
         packets = int(math.ceil(length / self.buffer))
@@ -55,7 +55,11 @@ class Client():
 
     def inputUser(self):
         while True:
-            inp = str(input("'Quit' to leave\n'???' to send message\n:"))
+            try:
+                inp = str(input("'Quit' to leave\n'???' to send message\n:"))
+            except:
+                print("EOF read, input cant work")
+                break
             if inp == "quit" or inp == "Quit":
                 break
             else:
@@ -126,7 +130,7 @@ class Client():
 toClose = None
 def signal_handler(sig, frame):
         if toClose:
-            toClose.closeSocjet()
+            toClose.closeSocket()
         os._exit(0)
 signal.signal(signal.SIGINT, signal_handler)
 
